@@ -268,9 +268,33 @@
 
   // ---- Video --------------------------------------------------------------
 
-  function findVideo(post) {
-    const videos = deepQueryAll("video, audio", post);
-    return videos.find(isVisible) || videos[0] || null;
+  const looksLikeMedia = (el) =>
+    typeof el.play === "function" &&
+    typeof el.pause === "function" &&
+    typeof el.paused === "boolean" &&
+    typeof el.currentTime === "number";
+
+  // A real <video>/<audio> inside root, or failing that any custom player
+  // element that exposes the same API. Prefers one that is already playing,
+  // then a visible one.
+  function findVideo(root) {
+    let media = deepQueryAll("video, audio", root).filter(looksLikeMedia);
+    if (!media.length) media = deepQueryAll("*", root).filter(looksLikeMedia);
+    return (
+      media.find((m) => !m.paused) || media.find(isVisible) || media[0] || null
+    );
+  }
+
+  // Last resort when no media element can be reached (e.g. it sits in a
+  // closed shadow root): the player's own play/pause button.
+  const PLAY_LABEL = /\b(play|pause|resume)\b/i;
+  function findPlayButton(root) {
+    const btns = deepQueryAll(CLICKABLE, root).filter((b) =>
+      PLAY_LABEL.test(
+        `${b.getAttribute("aria-label") || ""} ${b.getAttribute("title") || ""}`,
+      ),
+    );
+    return btns.find(isVisible) || btns[0] || null;
   }
 
   function seekVideo(video, delta) {
@@ -394,23 +418,55 @@
     return { root: document, scoped: false, how: "lightbox" };
   }
 
+  // Roots that n should look in, best first. Empty = navigation is off.
+  function playbackRoots() {
+    const found = getHighlighted(POST_SELECTOR);
+    if (REQUIRE_NAV_IN_LIGHTBOX && !found) return [];
+    const roots = [];
+    if (isLightboxOpen()) roots.push(queryItems(LIGHTBOX_SELECTOR)[0] || document);
+    if (found) roots.push(found.el);
+    return roots;
+  }
+
   // n -> play / pause the media on the highlighted post (or in the lightbox)
   function togglePlayback(e) {
-    const ctx = mediaContext();
-    if (!ctx) return; // navigation off: leave the key alone
-    const root = ctx.scoped
-      ? ctx.root
-      : queryItems(LIGHTBOX_SELECTOR)[0] || document;
-    const media = findVideo(root);
-    if (!media) return; // nothing to play: let Reddit handle the key
-    stop(e);
-    if (media.paused) {
-      dlog("playing media");
-      media.play()?.catch?.(() => {}); // autoplay rules can reject; ignore
-    } else {
-      dlog("pausing media");
-      media.pause();
+    const roots = playbackRoots();
+    if (!roots.length) return; // navigation off: leave the key alone
+
+    for (const root of roots) {
+      const media = findVideo(root);
+      if (media) {
+        stop(e);
+        if (media.paused) {
+          dlog("playing media", media);
+          media.play()?.catch?.(() => {}); // autoplay rules can reject; ignore
+        } else {
+          dlog("pausing media", media);
+          media.pause();
+        }
+        return;
+      }
+      const btn = findPlayButton(root);
+      if (btn) {
+        dlog("toggling playback via button", btn);
+        stop(e);
+        btn.click();
+        return;
+      }
     }
+
+    // Nothing playable found: say what is there, so it can be diagnosed.
+    // (Always logged: it only happens when n was pressed on a highlighted
+    // post that has no media we can control.)
+    const root = roots[roots.length - 1];
+    console.log(
+      "[reddit-hl-keys] n: no playable media found in",
+      root,
+      "| player-like elements:",
+      deepQueryAll("*", root).filter((el) =>
+        /player|video|media|audio/i.test(el.tagName),
+      ),
+    );
   }
 
   // h / l -> gallery prev/next, or video -/+ SEEK_SECONDS, on the highlighted
