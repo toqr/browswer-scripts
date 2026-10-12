@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Reddit h/l/;/p/y/. keyboard helpers
 // @namespace    local.reddit-hl-keys
-// @description  h/l: gallery prev/next or video -/+5s. ; open post. p back. y refresh. . collapse comment. Only while Reddit j/k navigation is on.
+// @description  h/l: gallery prev/next or video -/+5s. ; open post. p back. y refresh. . collapse comment. n play/pause. Only while Reddit j/k navigation is on.
 // @match        https://www.reddit.com/*
 // @match        https://reddit.com/*
 // @run-at       document-idle
@@ -34,6 +34,7 @@
     back: "p",
     refresh: "y",
     collapse: ".",
+    playPause: "n",
   };
 
   const POST_SELECTOR = "shreddit-post";
@@ -268,7 +269,7 @@
   // ---- Video --------------------------------------------------------------
 
   function findVideo(post) {
-    const videos = deepQueryAll("video", post);
+    const videos = deepQueryAll("video, audio", post);
     return videos.find(isVisible) || videos[0] || null;
   }
 
@@ -382,20 +383,42 @@
     target.dispatchEvent(new KeyboardEvent("keyup", init));
   }
 
+  // Where media keys act: the open lightbox, otherwise the highlighted post.
+  // Returns null when navigation is off (leave the key alone).
+  function mediaContext() {
+    if (REQUIRE_NAV_IN_LIGHTBOX || !isLightboxOpen()) {
+      const found = getHighlighted(POST_SELECTOR);
+      if (!found) return null;
+      return { root: found.el, scoped: true, how: found.how };
+    }
+    return { root: document, scoped: false, how: "lightbox" };
+  }
+
+  // n -> play / pause the media on the highlighted post (or in the lightbox)
+  function togglePlayback(e) {
+    const ctx = mediaContext();
+    if (!ctx) return; // navigation off: leave the key alone
+    const root = ctx.scoped
+      ? ctx.root
+      : queryItems(LIGHTBOX_SELECTOR)[0] || document;
+    const media = findVideo(root);
+    if (!media) return; // nothing to play: let Reddit handle the key
+    stop(e);
+    if (media.paused) {
+      dlog("playing media");
+      media.play()?.catch?.(() => {}); // autoplay rules can reject; ignore
+    } else {
+      dlog("pausing media");
+      media.pause();
+    }
+  }
+
   // h / l -> gallery prev/next, or video -/+ SEEK_SECONDS, on the highlighted
   // post (or inside the open lightbox).
   function handleHL(e, isNext) {
-    let root = document;
-    let scoped = false;
-    let how = "lightbox";
-
-    if (REQUIRE_NAV_IN_LIGHTBOX || !isLightboxOpen()) {
-      const found = getHighlighted(POST_SELECTOR);
-      if (!found) return; // navigation off: leave the key alone
-      root = found.el;
-      scoped = true;
-      how = found.how;
-    }
+    const ctx = mediaContext();
+    if (!ctx) return; // navigation off: leave the key alone
+    const { root, scoped, how } = ctx;
 
     // Gallery arrows. A held key shouldn't flip through a whole gallery:
     // repeats are swallowed but don't click again.
@@ -454,6 +477,7 @@
   ACTIONS.set(KEYS.back, { run: leavePost });
   ACTIONS.set(KEYS.refresh, { run: refreshPage });
   ACTIONS.set(KEYS.collapse, { run: toggleComment });
+  ACTIONS.set(KEYS.playPause, { run: togglePlayback });
 
   function handleKey(e) {
     if (!e.key) return; // some synthetic events (autofill) have no key
@@ -474,6 +498,6 @@
   console.log(
     "[reddit-hl-keys] loaded (h/l = prev/next image or -/+" +
       SEEK_SECONDS +
-      "s video, ; = open post, p = back, y = refresh, . = collapse comment)",
+      "s video, ; = open post, p = back, y = refresh, . = collapse comment, n = play/pause)",
   );
 })();
