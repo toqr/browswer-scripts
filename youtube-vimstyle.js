@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube Shorts j/k navigation
 // @namespace    local.youtube-shorts-jk
-// @description  On YouTube Shorts: j = next video, k = previous video, ; = like, h = play/pause.
+// @description  On YouTube Shorts: j = next video, k = previous video, ; = like, h = play/pause, , = comments.
 // @match        https://www.youtube.com/*
 // @run-at       document-idle
 // @noframes
@@ -99,6 +99,44 @@
     );
   }
 
+  // ---- Comments -------------------------------------------------------------
+
+  const COMMENTS_PANEL =
+    'ytd-engagement-panel-section-list-renderer[target-id="engagement-panel-comments-section"]';
+
+  const isShown = (el) => {
+    const r = el.getBoundingClientRect();
+    return r.width > 0 && r.height > 0;
+  };
+
+  // The comments panel, only if it is actually open.
+  function openCommentsPanel() {
+    for (const p of document.querySelectorAll(COMMENTS_PANEL)) {
+      const state = p.getAttribute("visibility") || "";
+      if (/EXPANDED/.test(state) || (!state && isShown(p))) return p;
+    }
+    return null;
+  }
+
+  function findCommentsButton(scope) {
+    // [id=...] rather than #id: YouTube repeats this id once per Short.
+    const direct = scope.querySelector(
+      '[id="comments-button"] button, ytd-reel-player-overlay-renderer [id="comments-button"] button',
+    );
+    if (direct) return direct;
+    for (const b of scope.querySelectorAll("button[aria-label]")) {
+      if (/comment/i.test(b.getAttribute("aria-label"))) return b;
+    }
+    return null;
+  }
+
+  function findPanelClose(panel) {
+    return (
+      panel.querySelector('[id="visibility-button"] button') ||
+      panel.querySelector('button[aria-label="Close"], button[aria-label*="lose"]')
+    );
+  }
+
   const ACTIONS = {
     // j / k: next / previous Short
     next: () => {
@@ -116,6 +154,16 @@
       const btn = findLikeButton(activeReel() || document);
       if (btn) btn.click();
     },
+    // , -> open / close the comments
+    comments: () => {
+      const panel = openCommentsPanel();
+      if (panel) {
+        // Open: close it (its own X, else press the comments button again).
+        const close = findPanelClose(panel);
+        if (close) return close.click();
+      }
+      findCommentsButton(activeReel() || document)?.click();
+    },
     // h -> play / pause
     playPause: () => {
       const video = findVideo(activeReel() || document);
@@ -125,7 +173,13 @@
     },
   };
 
-  const KEYMAP = { j: "next", k: "prev", ";": "like", h: "playPause" };
+  const KEYMAP = {
+    j: "next",
+    k: "prev",
+    ";": "like",
+    h: "playPause",
+    ",": "comments",
+  };
 
   function handleKey(e) {
     if (!e.key) return;
@@ -146,6 +200,6 @@
 
   window.addEventListener("keydown", handleKey, true);
   console.log(
-    "[youtube-shorts-jk] loaded (j = next, k = previous, ; = like, h = play/pause)",
+    "[youtube-shorts-jk] loaded (j = next, k = previous, ; = like, h = play/pause, , = comments)",
   );
 })();
