@@ -71,6 +71,10 @@
   // Only valid while we're still inside a post page.
   let enteredViaNav = false;
 
+  // Going back inside Reddit's single-page app leaves its j/k navigation in a
+  // broken state, so p goes back and then refreshes the page.
+  let reloadOnReturn = false;
+
   // ---- DOM helpers --------------------------------------------------------
 
   // Every query scope under `start`: itself plus all nested shadow roots
@@ -337,7 +341,9 @@
     stop(e);
     enteredViaNav = false;
     if (history.length > 1) {
-      dlog("leaving post (back)");
+      dlog("leaving post (back + refresh)");
+      reloadOnReturn = true;
+      setTimeout(() => (reloadOnReturn = false), 3000); // back never happened
       history.back();
       return;
     }
@@ -348,6 +354,15 @@
       location.assign(sub[0]);
     }
   }
+
+  // Refresh as soon as the back navigation lands on a non-post page.
+  function reloadAfterBack() {
+    if (!reloadOnReturn) return;
+    reloadOnReturn = false;
+    if (!inPostPage()) location.reload();
+  }
+  window.addEventListener("popstate", reloadAfterBack);
+  window.addEventListener("pageshow", (e) => e.persisted && reloadAfterBack());
 
   // y -> refresh the page, only while navigation is on
   function refreshPage(e) {
